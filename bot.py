@@ -378,7 +378,17 @@ async def server_status(interaction: discord.Interaction):
         # Get live status from Factorio.zone client
         fz_status = bot.fz_client.get_status()
         
-        if not state['is_running']:
+        db_running = state['is_running'] if state else False
+        fz_active = fz_status['status'] in ['STARTING', 'RUNNING', 'STOPPING']
+        
+        # Sync: If DB says running but FZ is offline, clear it
+        if db_running and fz_status['status'] == 'OFFLINE':
+            logger.warning("State out of sync in status check: DB says running but FZ says offline. Clearing state.")
+            await bot.state_manager.stop_server()
+            db_running = False
+            state = await bot.state_manager.get_server_state()
+
+        if not db_running and not fz_active:
             await interaction.followup.send("📊 **Server Status**: OFFLINE\n\nNo server is currently running.")
             return
         
@@ -393,18 +403,25 @@ async def server_status(interaction: discord.Interaction):
         emoji = status_emoji.get(status, "⚪")
         
         message = f"📊 **Server Status**: {emoji} {status}\n\n"
-        message += f"🌍 **Region**: {state['region']}\n"
-        message += f"🎮 **Version**: {state['version']}\n"
-        message += f"💾 **Save Slot**: {state['save_slot']}\n"
-        message += f"👤 **Started By**: {state['started_by']}\n"
-        message += f"🕐 **Started At**: {state['started_at']}\n"
+        
+        # If we have state, show it. If not (but server is active), show what we have.
+        if state and (db_running or fz_active):
+            message += f"🌍 **Region**: {state.get('region', 'Unknown')}\n"
+            message += f"🎮 **Version**: {state.get('version', 'Unknown')}\n"
+            message += f"💾 **Save Slot**: {state.get('save_slot', 'Unknown')}\n"
+            if state.get('started_by'):
+                message += f"👤 **Started By**: {state['started_by']}\n"
+            if state.get('started_at'):
+                message += f"🕐 **Started At**: {state['started_at']}\n"
         
         if fz_status['server_address']:
             message += f"\n🔗 **Server Address**: `{fz_status['server_address']}`\n"
             message += f"✅ **Ready to connect!**"
         elif status == "STARTING":
             message += f"\n⏳ Server is still starting up..."
-        
+        elif status == "RUNNING" and not fz_status['server_address']:
+            message += f"\n⏳ Server is running but address is not yet available..."
+            
         await interaction.followup.send(message)
         
     except Exception as e:
