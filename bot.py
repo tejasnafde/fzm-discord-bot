@@ -250,12 +250,29 @@ async def start_server(
         }
         
         # Start server via Factorio.zone API
-        launch_id = bot.fz_client.start_server(
-            region=region,
-            version=version,
-            save=save_slot,
-            mods=mods
-        )
+        try:
+            launch_id = bot.fz_client.start_server(
+                region=region,
+                version=version,
+                save=save_slot,
+                mods=mods
+            )
+        except Exception as e:
+            if str(e) == "OPERATION_IN_PROGRESS":
+                logger.warning("Factorio.zone reported a conflict (already running or operation in progress). Attempting to sync state...")
+                # Wait up to 5 seconds for WebSocket to pick up changes
+                for _ in range(10):
+                    await asyncio.sleep(0.5)
+                    status = bot.fz_client.get_status()
+                    if status['status'] in ['STARTING', 'RUNNING'] and status['launch_id']:
+                        launch_id = status['launch_id']
+                        logger.info(f"Successfully synced with active server (launch_id: {launch_id})")
+                        break
+                else:
+                    # If we still don't have a launch_id, it really failed
+                    raise Exception("The server is already running or busy, and I couldn't sync with it. Please wait a minute and try again.")
+            else:
+                raise e
         
         # Update state
         await bot.state_manager.start_server(

@@ -276,6 +276,9 @@ class FactorioZoneClient:
             
             if resp.status_code != 200:
                 logger.error(f"Failed to start server: {resp.status_code} - {resp.text}")
+                error_text = resp.text.lower()
+                if resp.status_code == 403 and ("another operation is in progress" in error_text or "already have 1 instance" in error_text):
+                    raise Exception("OPERATION_IN_PROGRESS")
                 raise Exception(f"Failed to start server: {resp.text}")
             
             launch_id = resp.json()["launchId"]
